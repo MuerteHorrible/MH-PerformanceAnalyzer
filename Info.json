@@ -1,0 +1,16 @@
+{
+  "identifier": "mh/performance-analyzer",
+  "version": "1.0.0",
+  "name": "MH Performance Analyzer",
+  "author": "MuerteHorrible",
+  "description": "Find out what makes Railroader stutter. Start and stop a recording in Preferences > Mods: it records frame times, lag spikes, memory and garbage collection, and how much main-thread time each mod takes. Each session gets an offline HTML report with charts, a spike list, per-mod timing and session comparison, plus a summary and a ready-made prompt to paste into any AI assistant. Reads and writes only its own Output folder.",
+  "license": "All rights reserved, see LICENSE.txt",
+  "assemblies": [
+    "MHPerformanceAnalyzer.dll"
+  ],
+  "dependencies": {
+    "required": [
+      "rr/game ==0.6.3"
+    ]
+  }
+}

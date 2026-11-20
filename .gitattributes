@@ -1,0 +1,2 @@
+# Keep every file byte for byte, so the build stays identical to the release DLL.
+* -text

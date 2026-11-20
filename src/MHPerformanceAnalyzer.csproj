@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Based on PrettyConvenientMenu.csproj (MIT, crazybmanp) -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>MHPerformanceAnalyzer</AssemblyName>
+    <RootNamespace>MHPerformanceAnalyzer</RootNamespace>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- No pdb and no build paths in the DLL (they would contain the local user folder). -->
+    <DebugType>none</DebugType>
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildProjectDirectory)=/_/</PathMap>
+    <!-- No Git commit id or repository data in the DLL, so a clone builds the same bytes as the release. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <EnableSourceLink>false</EnableSourceLink>
+    <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <RailroaderGameDir Condition="'$(RailroaderGameDir)' == ''">D:\Steam\steamapps\common\Railroader</RailroaderGameDir>
+    <ManagedDir>$(RailroaderGameDir)\Railroader_Data\Managed</ManagedDir>
+    <GameModDir Condition="'$(GameModDir)' == ''">$(MSBuildProjectDirectory)\..</GameModDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Railroader"><HintPath>$(ManagedDir)\Railroader.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Railroader.Modding"><HintPath>$(ManagedDir)\Railroader.Modding.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="AssetPack.Common"><HintPath>$(ManagedDir)\AssetPack.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(ManagedDir)\Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Map.Runtime"><HintPath>$(ManagedDir)\Map.Runtime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Relay"><HintPath>$(ManagedDir)\Relay.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Core"><HintPath>$(ManagedDir)\Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Unity.TextMeshPro"><HintPath>$(ManagedDir)\Unity.TextMeshPro.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(ManagedDir)\UnityEngine.UI.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(ManagedDir)\UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(ManagedDir)\UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine"><HintPath>$(ManagedDir)\UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule"><HintPath>$(ManagedDir)\UnityEngine.JSONSerializeModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(ManagedDir)\UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="report-template.html" LogicalName="MHPerformanceAnalyzer.report-template.html" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.4.3" />
+  </ItemGroup>
+
+  <!-- Deploy: dotnet build -c Release -t:Deploy -->
+  <Target Name="Deploy" DependsOnTargets="Build">
+    <ItemGroup>
+      <ModAssembly Include="$(TargetDir)MHPerformanceAnalyzer.dll" />
+      <ModAssembly Include="$(TargetDir)0Harmony.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ModAssembly)" DestinationFolder="$(GameModDir)" />
+    <Message Importance="high" Text="[MHPerformanceAnalyzer] Deployed to $(GameModDir)" />
+  </Target>
+</Project>

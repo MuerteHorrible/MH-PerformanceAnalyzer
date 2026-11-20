@@ -1,0 +1,16 @@
+MH Performance Analyzer
+Copyright (c) 2026 MuerteHorrible. All rights reserved, except as allowed below.
+
+Allowed: downloading and using this mod for free in Railroader.
+
+Not allowed without my written permission:
+- Re-uploading or redistributing it anywhere else.
+- Converting it to another game or format.
+- Modifying it or publishing modified versions.
+- Using its code in other works.
+- Selling it, charging for access to it, or earning donation points or any other income from it.
+
+To ask permission, send a private message to MuerteHorrible on Nexus Mods.
+
+Third-party components keep their own licences, listed in THIRD-PARTY-NOTICES.txt.
+

@@ -1,0 +1,919 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MH Performance Analyzer report</title>
+<style>
+/* Printed railway working timetable: paper, ink, ruled columns, one signal red for breaches only.
+   Line colours --s1 to --s3 and the red were checked together for colour-blind separation on each paper colour. */
+:root {
+  --paper: #F3F0E6;
+  --ink: #1C1B19;
+  --red: #B22A1F;
+  --blue: #1F5FA8;
+  --yellow: #A87A00;
+  --rule: rgba(28, 27, 25, 0.22);
+  --rule-strong: rgba(28, 27, 25, 0.55);
+  --dim: rgba(28, 27, 25, 0.62);
+  --faint: rgba(28, 27, 25, 0.08);
+  --labelc: #4A5D73;
+  --promptbg: #E4E1D7;
+  --s1: #1F5FA8;
+  --s2: #A87A00;
+  --s3: #0B8A7A;
+  --label: "Bahnschrift", "DIN Alternate", "DIN 2014", "Arial Narrow", sans-serif;
+  --figure: "Consolas", "Cascadia Mono", "Menlo", ui-monospace, monospace;
+}
+/* Dark mode: same layout, inverted paper and ink. */
+:root[data-theme="dark"] {
+  --paper: #1A1916;
+  --ink: #E9E5DA;
+  --red: #E0475F;
+  --blue: #7AAEEA;
+  --yellow: #E0B84E;
+  --rule: rgba(233, 229, 218, 0.20);
+  --rule-strong: rgba(233, 229, 218, 0.50);
+  --dim: rgba(233, 229, 218, 0.60);
+  --faint: rgba(233, 229, 218, 0.08);
+  --labelc: #9DB3CC;
+  --promptbg: #262521;
+  --s1: #3F74C8;
+  --s2: #B8881E;
+  --s3: #2E9E8E;
+}
+* { box-sizing: border-box; }
+html { background: var(--paper); }
+body { margin: 0; padding: 0 18px 10px; height: 100vh; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; background: var(--paper); color: var(--ink); font: 14px/1.35 var(--label); font-variant-numeric: tabular-nums; }
+.num, td.n, th.n, .fig { font-family: var(--figure); font-variant-numeric: tabular-nums; }
+td.n, th.n { text-align: right; white-space: nowrap; }
+
+/* Masthead */
+.masthead { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 22px; align-items: center; padding: 12px 0 6px; border-bottom: 2px solid var(--ink); }
+.masthead .title { font-size: 22px; font-weight: 700; letter-spacing: .02em; }
+.masthead .picker { display: flex; gap: 8px; align-items: center; }
+.masthead .meta button.theme { border: none; background: none; padding: 0; font: inherit; color: var(--labelc); text-decoration: underline; text-underline-offset: 2px; }
+.masthead .meta button.theme:hover { color: var(--ink); background: none; }
+.masthead .meta { font-family: var(--figure); font-size: 12px; color: var(--dim); justify-self: end; text-align: right; }
+.masthead label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--labelc); }
+select, button { font: 13px var(--label); color: var(--ink); background: var(--paper); border: 1px solid var(--rule-strong); border-radius: 0; padding: 3px 6px; }
+button { cursor: pointer; letter-spacing: .04em; }
+button:hover { background: var(--ink); color: var(--paper); }
+
+/* Section index (tabs) */
+nav { display: flex; flex-wrap: wrap; gap: 0 6px; padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+nav button { border: none; border-left: 1px solid transparent; border-right: 1px solid transparent; background: none; padding: 2px 10px; color: var(--dim); }
+nav button:hover { background: none; color: var(--ink); }
+nav button.on { color: var(--ink); font-weight: 700; border-left-color: var(--ink); border-right-color: var(--ink); }
+
+main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+section.tab { display: none; padding-top: 12px; }
+section.tab.on { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+h2 { color: var(--labelc); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; margin: 0 0 4px; padding-bottom: 3px; border-bottom: 1px solid var(--ink); }
+.unit { font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--dim); font-size: 12px; }
+h3 { color: var(--labelc); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; margin: 16px 0 4px; }
+.note { color: var(--dim); font-size: 12px; margin: 4px 0 8px; }
+.warn-line { color: var(--red); font-size: 13px; margin: 4px 0 8px; }
+.empty { padding: 30px 0; color: var(--dim); }
+
+/* Layout: asymmetric columns, sized by importance */
+.split { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr); gap: 0; align-items: start; }
+.split > :last-child { border-left: 1px solid var(--ink); padding-left: 14px; }
+.split > :last-child, .split-wide > :last-child { scrollbar-gutter: stable; box-sizing: border-box; }
+.split-wide { display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(300px, 1fr); gap: 0; align-items: start; }
+@media (max-width: 900px) { .split, .split-wide { grid-template-columns: 1fr; } .masthead { grid-template-columns: 1fr; } .masthead .meta { justify-self: start; text-align: left; } }
+.block { margin-bottom: 18px; }
+
+/* Ruled tables */
+table { border-collapse: collapse; width: 100%; }
+table.fixed { table-layout: fixed; }
+table.fixed td, table.fixed th { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+th, td { padding: 2px 6px; border-bottom: 1px solid var(--rule); vertical-align: baseline; text-align: left; }
+th { color: var(--labelc); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; border-bottom: 1px solid var(--ink); white-space: nowrap; cursor: pointer; position: sticky; top: 0; background: var(--paper); }
+th.n { font-family: var(--label); }
+th, th.n { text-align: center; }
+td { font-size: 13px; }
+td:first-child, th:first-child { padding-left: 0; }
+tbody tr.sel td { background: var(--faint); }
+tbody tr.sel td:first-child { box-shadow: inset 3px 0 0 var(--ink); padding-left: 6px; }
+tbody tr.pointer { cursor: pointer; }
+table.cmp tbody tr:last-child td { border-bottom: none; }
+tbody tr.grp td { cursor: pointer; padding-top: 8px; font-weight: 700; color: var(--labelc); border-bottom: 1px solid var(--ink); }
+tbody tr.grp .fold { display: inline-block; width: 1.2em; font-family: var(--figure); }
+tbody tr.grp .fig { float: right; font-weight: 400; color: var(--dim); }
+tbody tr.pointer:hover td { background: var(--faint); }
+.scroll { max-height: 560px; overflow: auto; padding-right: 10px; }
+.scroll.indent { margin-left: 18px; }
+.scroll.fill { max-height: none; }
+.scroll { scrollbar-gutter: stable; }
+.breach { color: var(--red); font-weight: 700; }
+.state { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.state.play { color: var(--red); font-weight: 700; }
+td.u { color: var(--dim); font-size: 12px; width: 1%; white-space: nowrap; }
+
+/* Figures table (metric, value, unit) */
+table.figures td.metric { color: var(--labelc); }
+table.figures td.v { font-family: var(--figure); text-align: right; font-size: 15px; white-space: nowrap; }
+table.figures .sub { color: var(--dim); font-size: 12px; }
+table.figures.fixed td.metric { white-space: normal; }
+
+/* Findings as timetable footnotes */
+ol.notes { list-style: none; margin: 0; padding: 0; counter-reset: n; }
+ol.notes li { counter-increment: n; display: grid; grid-template-columns: 26px 74px 1fr; gap: 0 8px; padding: 5px 0; border-bottom: 1px solid var(--rule); font-size: 14px; }
+ol.notes li::before { content: counter(n); font-family: var(--figure); color: var(--dim); text-align: right; }
+ol.notes .lvl { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; padding-top: 2px; color: var(--dim); }
+ol.notes li.info .lvl { color: var(--blue); font-weight: 700; }
+ol.notes li.warn .lvl { color: var(--yellow); font-weight: 700; }
+ol.notes li.suspect .lvl { color: var(--red); font-weight: 700; }
+
+.kv { display: grid; grid-template-columns: 138px minmax(0, 1fr); gap: 0 14px; font-size: 13px; }
+.kv > div { padding: 2px 0; border-bottom: 1px solid var(--rule); min-height: 1.6em; overflow: hidden; text-overflow: ellipsis; }
+.kv > div:nth-child(odd) { color: var(--labelc); }
+.kv > div:nth-child(even) { font-family: var(--figure); }
+ul.modlist { list-style: none; margin: 0; padding: 0 10px 0 0; max-height: 320px; overflow-y: auto; scrollbar-gutter: stable; }
+ul.modlist.fill { max-height: none; }
+ul.modlist li { display: grid; grid-template-columns: 1fr auto; gap: 0 12px; padding: 2px 6px 2px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+ul.modlist li:last-child { border-bottom: none; }
+ul.modlist .fig { font-size: 12px; color: var(--dim); text-align: right; }
+
+/* Charts: no borders, direct labels */
+.chart { position: relative; margin: 2px 0 14px; }
+.chart .ct { color: var(--labelc); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; border-bottom: 1px solid var(--ink); padding-bottom: 2px; }
+.chart canvas { width: 100%; display: block; }
+.chart .cd { font-size: 12px; color: var(--dim); margin: 2px 0 0; }
+.tip { position: absolute; pointer-events: none; background: var(--paper); border: 1px solid var(--ink); padding: 4px 6px; font: 12px/1.35 var(--figure); white-space: nowrap; z-index: 4; display: none; }
+.hint { font-size: 12px; color: var(--dim); margin: 0 0 6px; }
+.row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 4px 0 8px; font-size: 13px; }
+label.inline { display: inline-flex; gap: 5px; align-items: center; }
+label.inline input { margin: 0; }
+.stcount { display: inline-flex; align-items: baseline; gap: 6px; }
+.stcount .fig { font-size: 12px; }
+.placeholder { color: var(--dim); opacity: .7; font-size: 12px; padding: 4px 0; }
+.hintrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+input[type=checkbox] { accent-color: var(--ink); margin: 0; }
+
+/* Detail panel */
+.detail { border-left: 1px solid var(--ink); padding-left: 14px; font-size: 13px; }
+.detail .big { font-family: var(--figure); font-size: 26px; line-height: 1; }
+
+/* Markdown and text */
+.md h1 { font-size: 20px; margin: 4px 0 10px; }
+.md h2 { margin-top: 18px; }
+.md table { margin: 4px 0 12px; }
+.md td { font-size: 12px; }
+/* Summary tables: the same fixed column widths in every table, so their columns line up down the page. */
+.md table { width: auto; }
+.md table.aligned { table-layout: fixed; }
+.md td:first-child { text-align: left; }
+.md td { white-space: nowrap; }
+.md th { white-space: nowrap; }
+.md p.label { color: var(--labelc); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; margin: 14px 0 4px; }
+.md td.n { font-family: var(--figure); }
+.md code { font-family: var(--figure); font-size: 12px; }
+.md ul { padding-left: 18px; margin: 4px 0 10px; }
+textarea { width: 100%; min-height: 200px; display: block; resize: none; font: 12px/1.45 var(--figure); color: var(--ink); background: var(--promptbg); border: 1px solid var(--rule-strong); border-radius: 0; padding: 8px; }
+.note.disclaimer { margin: 0 0 8px; color: var(--dim); font-size: 12px; }
+footer { margin-top: 14px; padding-top: 6px; border-top: 1px solid var(--rule); font-size: 12px; color: var(--dim); }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="title">MH Performance Analyzer</div>
+  <div class="picker"><label for="sessionSel">Session</label><select id="sessionSel" disabled></select></div>
+  <div class="meta" id="status"></div>
+</header>
+<nav id="tabs">
+  <button data-tab="overview" class="on">Findings and steady play</button>
+  <button data-tab="timeline">Timeline record</button>
+  <button data-tab="spikes">Spikes</button>
+  <button data-tab="mods">Mod time</button>
+  <button data-tab="compare">Session comparison</button>
+  <button data-tab="summary">Summary</button>
+  <button data-tab="ai">ai-report.md</button>
+</nav>
+<main>
+  <section class="tab on" id="tab-overview"><div class="empty">No session in this page.</div></section>
+  <section class="tab" id="tab-timeline"></section>
+  <section class="tab" id="tab-spikes"></section>
+  <section class="tab" id="tab-mods"></section>
+  <section class="tab" id="tab-compare"></section>
+  <section class="tab" id="tab-summary"></section>
+  <section class="tab" id="tab-ai"></section>
+</main>
+<footer>MH Performance Analyzer © 2026 MuerteHorrible. All rights reserved. This page works offline and reads nothing from your computer: every figure it shows is stored inside the page.</footer>
+<script>
+"use strict";
+// ---------- helpers ----------
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (v, d = 2) => (v == null || !isFinite(v)) ? "-" : Number(v).toFixed(d);
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const SPIKE_LIMIT = 33.3;
+
+function parseCSV(text) {
+  const rows = []; let row = [], field = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      if (row.length > 1 || row[0] !== "") rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  if (!rows.length) return [];
+  const head = rows[0];
+  return rows.slice(1).map(r => {
+    const o = {};
+    head.forEach((h, i) => { const v = r[i]; o[h] = (v === undefined || v === "") ? null : (isNaN(+v) ? v : +v); });
+    return o;
+  });
+}
+function parseJSONL(text) {
+  const out = [];
+  for (const line of text.split(/\r?\n/)) { if (!line.trim()) continue; try { out.push(JSON.parse(line)); } catch (e) { } }
+  return out;
+}
+// opts.state: { key, dir } kept by the caller, so the sort survives a redraw.
+// opts.group: row => group name. Groups are listed by size, largest first, each under a heading row with its count;
+// the column sort applies inside each group. opts.folded: Set of folded group names (click a heading to fold it).
+function sortable(table, rows, cols, onRow, initKey = null, initDir = -1, opts = {}) {
+  const st = opts.state || { key: initKey, dir: initDir };
+  const render = () => {
+    const key = st.key, dir = st.dir;
+    let sorted = key == null ? rows : [...rows].sort((a, b) => {
+      const x = a[key], y = b[key];
+      if (typeof x === "number" && typeof y === "number") return (x - y) * dir;
+      return String(x ?? "").localeCompare(String(y ?? "")) * dir;
+    });
+    const rowHtml = r => `<tr class="${onRow ? "pointer" : ""}" data-i="${rows.indexOf(r)}">` + cols.map(c => `<td class="${c.n ? "n" : ""}" title="${esc(String(r[c.k] ?? ""))}">${c.f ? c.f(r[c.k], r) : esc(r[c.k])}</td>`).join("") + "</tr>";
+    let body;
+    if (opts.group) {
+      const groups = new Map();
+      for (const r of sorted) { const gname = opts.group(r); if (!groups.has(gname)) groups.set(gname, []); groups.get(gname).push(r); }
+      const order = [...groups.entries()].sort((p, q) => q[1].length - p[1].length || p[0].localeCompare(q[0]));
+      body = order.map(([gname, list]) => {
+        const folded = opts.folded && opts.folded.has(gname);
+        const share = rows.length ? Math.round(list.length / rows.length * 100) : 0;
+        return `<tr class="grp" data-g="${esc(gname)}"><td colspan="${cols.length}"><span class="fold">${folded ? "+" : "-"}</span>${esc(gname)}<span class="fig">${list.length} ${list.length === 1 ? "spike" : "spikes"}, ${share}%</span></td></tr>` +
+          (folded ? "" : list.map(rowHtml).join(""));
+      }).join("");
+    } else body = sorted.map(rowHtml).join("");
+    // Fixed layout: widths come from the colgroup, never from the text, so columns stay put.
+    // The sort arrow has its own fixed slot, so sorting never changes a heading's width.
+    table.classList.add("fixed");
+    table.innerHTML = "<colgroup>" + cols.map(c => `<col style="${c.w ? "width:" + c.w : ""}">`).join("") + "</colgroup><thead><tr>" +
+      cols.map(c => `<th class="${c.n ? "n" : ""}" data-k="${c.k}" title="${esc(c.label)}">${esc(c.label)}<span style="display:inline-block;width:1em;text-align:center">${key === c.k ? (dir > 0 ? "↑" : "↓") : ""}</span></th>`).join("") + "</tr></thead><tbody>" +
+      body + "</tbody>";
+    table.querySelectorAll("th").forEach(th => th.onclick = () => { const k = th.dataset.k; if (st.key === k) st.dir = -st.dir; else { st.key = k; st.dir = -1; } render(); });
+    table.querySelectorAll("tr.grp").forEach(tr => tr.onclick = () => { const gname = tr.dataset.g; if (!opts.folded) return; if (opts.folded.has(gname)) opts.folded.delete(gname); else opts.folded.add(gname); render(); });
+    if (onRow) table.querySelectorAll("tbody tr[data-i]").forEach(tr => tr.onclick = () => { table.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); onRow(rows[+tr.dataset.i]); });
+  };
+  render();
+}
+function figRow(metric, value, unit, sub, breach) {
+  if (value == null || value === "undefined") value = "-";
+  return `<tr><td class="metric">${esc(metric)}${sub ? `<div class="sub">${esc(sub)}</div>` : ""}</td><td class="v${breach ? " breach" : ""}">${value}</td><td class="u">${esc(unit || "")}</td></tr>`;
+}
+const stateLabel = st => st === "analyzer" ? "MH-PA" : st === "play" ? "gameplay" : st;
+const stateCell = st => `<span class="state ${st === "play" ? "play" : ""}">${esc(stateLabel(st))}</span>`;
+
+// ---------- light and dark mode (remembered in this browser only, when it allows it) ----------
+function themeName() { return document.documentElement.dataset.theme === "dark" ? "dark" : "light"; }
+function setTheme(name) {
+  document.documentElement.dataset.theme = name;
+  try { localStorage.setItem("mhpa-theme", name); } catch (e) { }
+  const b = $("#themeBtn"); if (b) b.textContent = name === "dark" ? "Light mode" : "Dark mode";
+  Charts.redrawAll();
+}
+function toggleTheme() { setTheme(themeName() === "dark" ? "light" : "dark"); }
+try { if (localStorage.getItem("mhpa-theme") === "dark") document.documentElement.dataset.theme = "dark"; } catch (e) { }
+
+// ---------- embedded data ----------
+// Written by MH Performance Analyzer when a recording stops. Every figure this page shows is in ANALYZER_DATA below.
+const ANALYZER_DATA = /*ANALYZER_DATA*/null;
+let sessions = [];
+const cache = new Map();
+
+function sessionLabel(s) { return `${s.started || s.name}   ${s.minutes != null ? fmt(s.minutes, 1) + " min" : ""}   ${s.name}`; }
+function visibleSessions() { return sessions; }
+function minutesBetween(a, b) { if (!a || !b) return null; const t = s => Date.parse(s.replace(" ", "T")); const m = (t(b) - t(a)) / 60000; return isFinite(m) ? m : null; }
+function initSessions() {
+  sessions = (ANALYZER_DATA && ANALYZER_DATA.sessions) || [];
+  for (const s of sessions) {
+    const r = s.report || {}, ses = r.session || {}, info = s.sessionInfo || {};
+    s.started = ses.startedLocal || info.startedLocal || ""; s.minutes = ses.durationMinutes ?? minutesBetween(info.startedLocal, info.endedLocal); s.version = r.analyzerVersion || "earlier version";
+    s.final = !!ses.final; s.worldLoads = ses.worldLoads;
+  }
+  const sel = $("#sessionSel");
+  sel.innerHTML = sessions.map(s => `<option value="${esc(s.name)}">${esc(sessionLabel(s))}</option>`).join("");
+  sel.disabled = sessions.length < 2;
+  sel.onchange = e => selectSession(e.target.value);
+  if (sessions.length) selectSession(sessions[0].name);
+  else $("#status").textContent = "no sessions";
+}
+
+// ---------- tabs (keys 1 to 7 switch too) ----------
+// Makes an element reach the bottom of the window, just above the footer.
+function fitToBottom() {
+  // The page itself never scrolls: header, tabs and footer stay put and the open tab gets the space between.
+  // A .fill element (or the Timeline charts) takes what is left below it, then gives back any overflow.
+  const sec = $("section.tab.on");
+  if (!sec) return;
+  const bottom = () => sec.getBoundingClientRect().bottom;
+  const over = () => sec.scrollHeight - sec.clientHeight;
+  // Side columns scroll on their own, so a tall column never pushes the page.
+  const wide = window.innerWidth > 900;
+  sec.querySelectorAll(".split > :last-child, .split-wide > :last-child").forEach(el => {
+    el.style.maxHeight = wide ? Math.max(120, bottom() - el.getBoundingClientRect().top) + "px" : "";
+    el.style.overflowY = wide ? "auto" : "";
+  });
+  sec.querySelectorAll(".fill").forEach(el => {
+    el.style.height = Math.max(120, bottom() - el.getBoundingClientRect().top) + "px";
+    const o = over();
+    if (o > 0) el.style.height = Math.max(120, el.offsetHeight - o) + "px";
+  });
+  // Timeline record: the charts share the height below them, in proportion to their usual heights.
+  const host = sec.querySelector("#tlCharts");
+  if (host) {
+    const charts = Charts.list.filter(c => host.contains(c.wrap));
+    if (charts.length) {
+      const base = charts.reduce((s, c) => s + c.base, 0);
+      const size = k => charts.forEach(c => { c.h = Math.max(60, Math.round(c.base * k)); c.draw(); });
+      size(1);
+      const spare = bottom() - host.getBoundingClientRect().bottom;
+      size(Math.max(0.2, (base + spare) / base));
+      const o = over();
+      if (o > 0) size(Math.max(0.2, (base + spare - o) / base));
+    }
+  }
+}
+window.addEventListener("resize", () => fitToBottom());
+function showTab(name) {
+  document.querySelectorAll("#tabs button").forEach(x => x.classList.toggle("on", x.dataset.tab === name));
+  document.querySelectorAll("section.tab").forEach(x => x.classList.toggle("on", x.id === "tab-" + name));
+  Charts.redrawAll();
+  fitToBottom();
+  if (name === "summary") alignSummaryTables();
+}
+$("#tabs").onclick = e => { const b = e.target.closest("button"); if (b) showTab(b.dataset.tab); };
+document.addEventListener("keydown", e => {
+  if (e.target.matches("input, textarea, select") || e.ctrlKey || e.altKey || e.metaKey) return;
+  const tabs = [...document.querySelectorAll("#tabs button")], i = +e.key - 1;
+  if (i >= 0 && i < tabs.length) showTab(tabs[i].dataset.tab);
+});
+
+// ---------- session data ----------
+async function loadSession(name) {
+  if (cache.has(name)) return cache.get(name);
+  const s = sessions.find(x => x.name === name);
+  const d = {
+    name, meta: s, report: s.report || null, system: s.system || null, mods: s.mods || [],
+    frames: s.frames ? parseCSV(s.frames) : [], spikes: s.spikes ? parseJSONL(s.spikes) : [], timing: s.timing ? parseCSV(s.timing) : [],
+    summary: s.summary || "", ai: s.ai || "",
+  };
+  derive(d);
+  cache.set(name, d);
+  return d;
+}
+function spikeState(sp) {
+  if (sp.state === "perflog") return "analyzer";
+  if (sp.state) return sp.state;
+  if (sp.analyzerBusy || sp.perflogBusy) return "analyzer";
+  if (sp.loading) return "loading";
+  if (sp.saving) return "saving";
+  return sp.world ? "play" : "menu";
+}
+function derive(d) {
+  const F = d.frames;
+  const firstWorld = F.find(r => r.world === 1);
+  d.worldStartT = firstWorld ? firstWorld.t_s : null;
+  const hasPlayS = F.length && "play_s" in F[0];
+  for (const r of F) r._play = r.world === 1 ? (hasPlayS && r.play_s != null ? r.play_s : (d.worldStartT != null ? r.t_s - d.worldStartT : null)) : null;
+  d.steadyRows = F.filter(r => ("steady" in r && r.steady != null) ? r.steady === 1 : (r.world === 1 && r.loading === 0 && r._play != null && r._play > 60));
+  d.spikes.forEach(sp => { sp._state = spikeState(sp); sp._old = !("timerLagFrames" in sp); });
+  const S = d.steadyRows, n = S.length;
+  const wsum = (k) => S.reduce((a, r) => a + (r[k] ?? 0) * (r.frames || 0), 0) / Math.max(1, S.reduce((a, r) => a + (r.frames || 0), 0));
+  const avg = (k) => n ? S.reduce((a, r) => a + (r[k] ?? 0), 0) / n : null;
+  const t0 = n ? S[0].t_s : 0, t1 = n ? S[n - 1].t_s : 0;
+  const playSpikes = d.spikes.filter(sp => sp._state === "play" && n && sp.t >= t0 - 1 && sp.t <= t1);
+  d.steady = n ? {
+    seconds: n, ms: wsum("ms_avg"), p99: avg("ms_p99"), max: Math.max(...S.map(r => r.ms_max ?? 0)),
+    cpuMain: wsum("cpu_main_ms"), cpuRender: wsum("cpu_render_ms"), gpu: wsum("gpu_ms"),
+    gcPerMin: S.reduce((a, r) => a + (r.gc_collections ?? 0), 0) / n * 60, alloc: avg("alloc_mb"),
+    draw: "draw_calls" in S[0] ? avg("draw_calls") : null, spikes: playSpikes.length, spikesPerMin: playSpikes.length / (n / 60),
+    cam: S.find(r => r.cam_x != null) || null,
+  } : null;
+  if (d.steady) d.steady.fps = 1000 / d.steady.ms;
+  d.shade = []; let st = null;
+  for (const r of F) {
+    const off = r.world !== 1 || r.loading === 1;
+    if (off && st == null) st = r.t_s - 1;
+    if (!off && st != null) { d.shade.push([st, r.t_s - 1]); st = null; }
+  }
+  if (st != null && F.length) d.shade.push([st, F[F.length - 1].t_s]);
+  const byT = new Map();
+  for (const r of d.timing) {
+    if (!byT.has(r.t_s)) byT.set(r.t_s, { frames: 0, mods: new Map() });
+    const w = byT.get(r.t_s);
+    if (r.calls_per_frame > 0) w.frames = Math.max(w.frames, r.calls / r.calls_per_frame);
+    for (const m of String(r.mods).split("+")) w.mods.set(m, (w.mods.get(m) || 0) + (r.total_ms || 0));
+  }
+  const modTot = new Map();
+  d.modWindows = [...byT].sort((a, b) => a[0] - b[0]).map(([t, w]) => {
+    const o = { t_s: t };
+    for (const [m, ms] of w.mods) { o[m] = w.frames > 0 ? ms / w.frames : null; modTot.set(m, (modTot.get(m) || 0) + ms); }
+    return o;
+  });
+  d.modTotals = [...modTot].sort((a, b) => b[1] - a[1]);
+  const meth = new Map();
+  for (const r of d.timing) {
+    const k = r.method + "|" + r.mods;
+    if (!meth.has(k)) meth.set(k, { method: r.method, kind: r.kind, mods: r.mods, calls: 0, total_ms: 0, max_call_ms: 0 });
+    const m = meth.get(k); m.calls += r.calls || 0; m.total_ms += r.total_ms || 0; m.max_call_ms = Math.max(m.max_call_ms, r.max_call_ms || 0);
+  }
+  d.methods = [...meth.values()].map(m => ({ ...m, avg_us: m.calls ? m.total_ms * 1000 / m.calls : 0 }));
+}
+
+// ---------- charts: hairlines, direct labels, no legend, no borders ----------
+const Charts = {
+  list: [], range: null, hoverX: null, pending: new Set(), frame: 0,
+  redrawAll() { this.list.forEach(c => c.draw()); },
+  // Redraws a group once per screen refresh, however many mouse events arrive.
+  redrawGroup(g) {
+    this.pending.add(g);
+    if (this.frame) return;
+    this.frame = requestAnimationFrame(() => { const gs = this.pending; this.pending = new Set(); this.frame = 0; this.list.filter(c => gs.has(c.group)).forEach(c => c.draw()); });
+  },
+  reset() { this.list = []; this.range = null; this.hoverX = null; },
+};
+// Series: { key, label, weight, dash, dim, dec, c }. Colour slot c (0 to 2, default: the series' position; 3 and up = ink),
+// plus weight and dash, so lines stay apart without colour too.
+class Chart {
+  constructor(host, opt) {
+    this.opt = opt;
+    const wrap = document.createElement("div"); wrap.className = "chart";
+    wrap.innerHTML = `<div class="ct">${esc(opt.title)}${opt.unit ? ` <span class="unit">${esc(opt.unit)}</span>` : ""}<span class="unit clipnote"></span></div>${opt.desc ? `<div class="cd">${esc(opt.desc)}</div>` : ""}<canvas></canvas><div class="tip"></div>`;
+    host.appendChild(wrap);
+    this.canvas = $("canvas", wrap); this.tip = $(".tip", wrap); this.wrap = wrap;
+    this.h = this.base = opt.height || 150;
+    Charts.list.push(this);
+    this.bind();
+  }
+  get group() { return this.opt.group || "main"; }
+  xr() { const g = Charts.range && Charts.range[this.group]; return g || this.opt.xDomain; }
+  setXr(r) { Charts.range = Charts.range || {}; Charts.range[this.group] = r; Charts.redrawGroup(this.group); }
+  bind() {
+    const c = this.canvas; let drag = null;
+    c.addEventListener("wheel", e => {
+      e.preventDefault();
+      const [a, b] = this.xr(), p = this.pxToX(e.offsetX), k = e.deltaY > 0 ? 1.25 : 0.8;
+      const [d0, d1] = this.opt.xDomain;
+      let na = p - (p - a) * k, nb = p + (b - p) * k;
+      if (nb - na > d1 - d0) { na = d0; nb = d1; }
+      this.setXr([Math.max(d0, na), Math.min(d1, nb)]);
+    }, { passive: false });
+    c.addEventListener("mousedown", e => { drag = { x: e.offsetX, r: this.xr() }; });
+    window.addEventListener("mouseup", () => { drag = null; });
+    c.addEventListener("mousemove", e => {
+      if (drag && e.buttons) {
+        const [a, b] = drag.r, dx = (e.offsetX - drag.x) / this.plotW * (b - a), [d0, d1] = this.opt.xDomain;
+        let na = a - dx, nb = b - dx;
+        if (na < d0) { nb += d0 - na; na = d0; } if (nb > d1) { na -= nb - d1; nb = d1; }
+        this.setXr([na, nb]); return;
+      }
+      Charts.hoverX = { g: this.group, x: this.pxToX(e.offsetX) };
+      this.mouse = { x: e.offsetX, y: e.offsetY };
+      Charts.redrawGroup(this.group);
+    });
+    c.addEventListener("mouseleave", () => { Charts.hoverX = null; this.mouse = null; Charts.redrawGroup(this.group); });
+    c.addEventListener("dblclick", () => this.setXr(this.opt.xDomain));
+    c.addEventListener("click", e => {
+      if (!this.opt.markers || !this.opt.onMarker) return;
+      const m = this.markerAt(e.offsetX, e.offsetY); if (m) this.opt.onMarker(m);
+    });
+  }
+  pxToX(px) { const [a, b] = this.xr(); return a + (px - this.padL) / this.plotW * (b - a); }
+  xToPx(x) { const [a, b] = this.xr(); return this.padL + (x - a) / (b - a) * this.plotW; }
+  markerAt(px, py) {
+    if (py > 20) return null;
+    let best = null, bd = 8;
+    for (const m of this.opt.markers) { const d = Math.abs(this.xToPx(m.x) - px); if (d < bd) { bd = d; best = m; } }
+    return best;
+  }
+  draw() {
+    if (!this.wrap.isConnected || this.wrap.offsetParent === null) return;
+    const dpr = window.devicePixelRatio || 1, W = this.wrap.clientWidth, H = this.h;
+    const c = this.canvas; c.width = W * dpr; c.height = H * dpr; c.style.height = H + "px";
+    const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+    const pal = [cssVar("--s1"), cssVar("--s2"), cssVar("--s3")];
+    const colour = (s, i) => { const c = s.c ?? i; return c < pal.length ? pal[c] : cssVar("--ink"); };
+    const o = this.opt, xk = o.xKey, ink = cssVar("--ink"), red = cssVar("--red"), rule = cssVar("--rule"), dim = cssVar("--dim"), faint = cssVar("--faint");
+    const labelFont = "11px " + cssVar("--label"), figFont = "11px " + cssVar("--figure");
+    this.padL = 44; this.padR = 140; const padT = o.markers ? 20 : 6, padB = 16;
+    this.plotW = W - this.padL - this.padR; const plotH = H - padT - padB;
+    const [a, b] = this.xr();
+    const vis = o.data.filter(r => r[xk] != null && r[xk] >= a && r[xk] <= b);
+    // For drawing, one more point on each side, so the lines reach the plot edges at any zoom (the clip cuts them).
+    let i0 = o.data.findIndex(r => r[xk] != null && r[xk] >= a);
+    if (i0 < 0) i0 = o.data.length;
+    let i1 = i0;
+    while (i1 < o.data.length && (o.data[i1][xk] == null || o.data[i1][xk] <= b)) i1++;
+    const drawn = o.data.slice(Math.max(0, i0 - 1), Math.min(o.data.length, i1 + 1)).filter(r => r[xk] != null);
+    const inShade = x => (o.shade || []).some(([s, e]) => x >= s && x <= e);
+    // The y scale comes from the whole recording, not the visible part, so it stays fixed while zooming and
+    // panning and busy and calm stretches can be compared by eye. The top sits at least 10 % above the highest line;
+    // worst-frame lines (clip) count up to their 99th percentile, so one huge hitch does not flatten everything else.
+    const key = o.shadeInScale ? "all" : "play";
+    this.scale = this.scale || {};
+    if (!this.scale[key]) {
+      let m = 0, cut = false;
+      const clipVals = [];
+      for (const r of o.data) {
+        if (r[xk] == null || (!o.shadeInScale && inShade(r[xk]))) continue;
+        for (const s of o.series) { const v = r[s.key]; if (v == null || !isFinite(v)) continue; if (s.clip) clipVals.push(v); else if (v > m) m = v; }
+      }
+      if (clipVals.length) { clipVals.sort((p, q) => p - q); m = Math.max(m, clipVals[Math.floor((clipVals.length - 1) * 0.99)]); }
+      if (o.threshold) m = Math.max(m, o.threshold.value * 1.25);
+      m = niceMax(Math.max(m, 1e-6) * 1.1);
+      for (const r of o.data) { if (r[xk] == null || (!o.shadeInScale && inShade(r[xk]))) continue; for (const s of o.series) { if (s.clip && r[s.key] > m) cut = true; } }
+      this.scale[key] = { m, cut };
+    }
+    let ymax = this.scale[key].m, clipped = this.scale[key].cut;
+    // Values above the top are drawn where they really are and cut by the plot edge, so a line leaves the chart
+    // steeply instead of running flat along the top.
+    const y = v => padT + plotH - Math.min(v, ymax * 4) / ymax * plotH;
+    const over = [];
+    // Menu and loading spans: faint fill, no edges.
+    g.fillStyle = faint;
+    for (const [s, e] of o.shade || []) { const x0 = Math.max(this.padL, this.xToPx(s)), x1 = Math.min(this.padL + this.plotW, this.xToPx(e)); if (x1 > x0) g.fillRect(x0, padT, x1 - x0, plotH); }
+    // Three hairlines with figures, time along the foot.
+    g.strokeStyle = rule; g.lineWidth = 1; g.fillStyle = dim; g.font = figFont; g.textAlign = "right"; g.textBaseline = "middle";
+    for (let i = 0; i <= 2; i++) {
+      const v = ymax * i / 2, yy = Math.round(y(v)) + .5;
+      g.beginPath(); g.moveTo(this.padL, yy); g.lineTo(this.padL + this.plotW, yy); g.stroke();
+      g.fillText(fmtAxis(v), this.padL - 6, yy);
+    }
+    const step = niceStep((b - a) / Math.max(2, Math.floor(this.plotW / 100)));
+    g.textAlign = "center"; g.textBaseline = "top";
+    for (let t = Math.ceil(a / step) * step; t <= b; t += step) g.fillText(fmtTime(t), this.xToPx(t), H - padB + 3);
+    // The spike threshold: the only red line. Its label joins the direct labels below.
+    const ends = [];
+    if (o.threshold && o.threshold.value < ymax) {
+      const ty = Math.round(y(o.threshold.value)) + .5;
+      g.strokeStyle = red; g.setLineDash([4, 3]); g.beginPath(); g.moveTo(this.padL, ty); g.lineTo(this.padL + this.plotW, ty); g.stroke(); g.setLineDash([]);
+      ends.push({ threshold: true, v: o.threshold.value, text: o.threshold.label });
+    }
+    // Series, labelled directly at the right with their mean over the visible range.
+    g.save(); g.beginPath(); g.rect(this.padL, padT, this.plotW, plotH); g.clip();
+    o.series.forEach((s, si) => {
+      g.strokeStyle = colour(s, si); g.globalAlpha = s.dim ? 0.6 : 1; g.lineWidth = s.weight || 1.5; g.setLineDash(s.dash || []); g.beginPath();
+      let started = false, lastPx = null, mn = null, mx = null, sum = 0, cnt = 0;
+      const flush = px => { if (mn == null) return; if (!started) { g.moveTo(px, y(mn)); started = true; } else g.lineTo(px, y(mn)); if (mx !== mn) g.lineTo(px, y(mx)); };
+      for (const r of drawn) {
+        const v = r[s.key]; if (v == null || !isFinite(v)) { flush(lastPx); mn = mx = null; started = false; lastPx = null; continue; }
+        if (r[xk] >= a && r[xk] <= b && (o.shadeInScale || !inShade(r[xk]))) { sum += v; cnt++; }
+        const px = Math.round(this.xToPx(r[xk]));
+        if (v > ymax && !s.dim) over.push(px);
+        if (px !== lastPx) { flush(lastPx); lastPx = px; mn = mx = v; } else { mn = Math.min(mn, v); mx = Math.max(mx, v); }
+      }
+      flush(lastPx); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+      if (cnt) ends.push({ s, si, v: sum / cnt });
+    });
+    g.restore();
+    // Small ticks on the top edge where a main line goes above the scale.
+    g.strokeStyle = dim; g.lineWidth = 1;
+    for (const px of new Set(over)) { g.beginPath(); g.moveTo(px + .5, padT); g.lineTo(px + .5, padT + 4); g.stroke(); }
+    $(".clipnote", this.wrap).textContent = clipped ? ", rare worst frames go past the top" : "";
+    // Direct labels: placed at their value, spread 12 px apart, kept inside the plot height.
+    ends.sort((p, q) => q.v - p.v);
+    const top = padT + 5, bottom = padT + plotH - 5, gapY = 12;
+    const ys = ends.map(e => Math.max(top, Math.min(bottom, y(Math.min(e.v, ymax)))));
+    for (let i = 1; i < ys.length; i++) if (ys[i] - ys[i - 1] < gapY) ys[i] = ys[i - 1] + gapY;
+    for (let i = ys.length - 1; i >= 0; i--) {
+      const limit = i === ys.length - 1 ? bottom : ys[i + 1] - gapY;
+      if (ys[i] > limit) ys[i] = limit;
+    }
+    g.font = labelFont; g.textAlign = "left"; g.textBaseline = "middle";
+    ends.forEach((e, i) => {
+      const yy = ys[i], x0 = this.padL + this.plotW;
+      if (e.threshold) { g.fillStyle = red; g.fillText(e.text, x0 + 20, yy); return; }
+      g.strokeStyle = colour(e.s, e.si); g.globalAlpha = e.s.dim ? 0.6 : 1; g.lineWidth = e.s.weight || 1.5; g.setLineDash(e.s.dash || []);
+      g.beginPath(); g.moveTo(x0 + 4, yy); g.lineTo(x0 + 16, yy); g.stroke(); g.setLineDash([]);
+      g.fillStyle = e.s.dim ? dim : ink; g.globalAlpha = 1;
+      g.fillText(`${e.s.label} ${fmt(e.v, e.s.dec ?? 1)}`, x0 + 20, yy);
+    });
+    // Spike ticks along the top, all in the same red, 3 px wide. Each tick has a 1 px paper edge, so two ticks
+    // side by side stay apart instead of merging into one block.
+    if (o.markers) {
+      const paper = cssVar("--paper");
+      const shown = o.markers.filter(m => m.x >= a && m.x <= b).map(m => Math.round(this.xToPx(m.x))).sort((p, q) => p - q);
+      for (const px of shown) {
+        g.fillStyle = paper; g.fillRect(px - 2, 2, 5, 14);
+        g.fillStyle = red; g.fillRect(px - 1, 2, 3, 14);
+      }
+    }
+    // Hover rule and tooltip.
+    const hx = Charts.hoverX && Charts.hoverX.g === this.group ? Charts.hoverX.x : null;
+    this.tip.style.display = "none";
+    if (hx != null && vis.length) {
+      let near = vis[0]; for (const r of vis) if (Math.abs(r[xk] - hx) < Math.abs(near[xk] - hx)) near = r;
+      const xx = Math.round(this.xToPx(near[xk])) + .5;
+      g.strokeStyle = ink; g.lineWidth = 1; g.setLineDash([]); g.globalAlpha = 0.5; g.beginPath(); g.moveTo(xx, padT); g.lineTo(xx, padT + plotH); g.stroke(); g.globalAlpha = 1;
+      if (this.mouse) {
+        const mk = o.markers && this.markerAt(this.mouse.x, this.mouse.y);
+        let html = fmtTime(near[xk]) + o.series.map(s => `<br>${esc(s.label)} ${fmt(near[s.key], s.dec ?? 2)}`).join("");
+        if (mk) html = `spike ${fmt(mk.sp.ms, 1)} ms, ${esc(stateLabel(mk.state))}, at ${fmtTime(mk.x)}<br>click for the record`;
+        this.tip.innerHTML = html; this.tip.style.display = "block";
+        const tw = this.tip.offsetWidth; let left = this.mouse.x + 14; if (left + tw > W) left = this.mouse.x - tw - 14;
+        this.tip.style.left = left + "px"; this.tip.style.top = (this.mouse.y + 22) + "px";
+      }
+    }
+  }
+}
+function niceMax(v) { const p = Math.pow(10, Math.floor(Math.log10(v))); for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return m * p; return 10 * p; }
+function niceStep(v) { const p = Math.pow(10, Math.floor(Math.log10(Math.max(v, 1e-9)))); for (const m of [1, 2, 5, 10]) if (m * p >= v) return m * p; return 10 * p; }
+function fmtAxis(v) { return v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "k" : (v >= 10 ? v.toFixed(0) : v.toFixed(v >= 1 ? 1 : 2)); }
+function fmtTime(t) { if (t == null) return "-"; const s = Math.round(t), m = Math.floor(Math.abs(s) / 60), r = Math.abs(s) % 60; return (s < 0 ? "-" : "") + m + ":" + String(r).padStart(2, "0"); }
+window.addEventListener("resize", () => Charts.redrawAll());
+
+// ---------- views ----------
+let current = null;
+async function selectSession(name) {
+  if (!name) return;
+  current = await loadSession(name);
+  const r = current.report || {}, ses = r.session || {}, sys = current.system || {};
+  $("#status").innerHTML = `${esc(ses.startedLocal || current.meta.started || "")}   ${esc(ses.map || "")}   ${fmt(ses.durationMinutes ?? current.meta.minutes, 1)} min<br>` +
+    `<button class="theme" id="themeBtn">${themeName() === "dark" ? "Light mode" : "Dark mode"}</button> | game ${esc((r.system || {}).gameVersion || sys.gameVersion || "-")} | analyzer ${esc(r.analyzerVersion || "-")}`;
+  $("#themeBtn").onclick = toggleTheme;
+  Charts.reset();
+  renderOverview(); renderTimeline(); renderSpikes(); renderMods(); renderCompare(); renderSummary(); renderAi();
+  Charts.redrawAll();
+  fitToBottom();
+}
+
+function renderOverview() {
+  const d = current, el = $("#tab-overview"), r = d.report;
+  if (!r) { el.innerHTML = `<div class="empty">Recorded before reports existed (or interrupted), so there are no findings. The per-second record, spikes, mod time and session comparison still work.</div>`; return; }
+  const st = r.frameTimes && r.frameTimes[0], sp = r.spikes || {}, ses = r.session || {}, v = r.view || {};
+  const LEVEL_LABEL = { info: "info", warn: "warning", suspect: "suspect" };
+  const notes = (r.findings || []).map(f => `<li class="${esc(f.level)}"><span class="lvl">${esc(LEVEL_LABEL[f.level] || f.level)}</span><span>${esc(f.text)}</span></li>`).join("");
+  const gpuBound = r.steady && r.steady.gpuMs > r.steady.cpuMainMs * 1.2;
+  const figures = st && st.frames ? `<table class="figures fixed"><colgroup><col><col style="width:84px"><col style="width:72px"></colgroup><tbody>
+      ${figRow("frame time, average", fmt(st.avgMs), "ms", fmt(st.avgFps, 0) + " fps")}
+      ${figRow("frame time, 99th percentile", fmt(st.p99Ms, 1), "ms", null, st.p99Ms > SPIKE_LIMIT)}
+      ${figRow("frame time, worst", fmt(st.maxMs, 1), "ms", null, st.maxMs > SPIKE_LIMIT)}
+      ${figRow("frames over 33.3 ms", st.over33Ms, "frames", null, st.over33Ms > 0)}
+      ${figRow("CPU main thread", fmt(r.steady.cpuMainMs), "ms", gpuBound ? null : "sets the frame rate")}
+      ${figRow("CPU render thread", fmt(r.steady.cpuRenderMs), "ms")}
+      ${figRow("GPU", fmt(r.steady.gpuMs), "ms", gpuBound ? "sets the frame rate" : null)}
+      ${figRow("play spikes", sp.play, "", fmt(sp.playPerMinute, 1) + " per min", sp.play > 0)}
+      ${figRow("garbage collections", fmt(r.gc.perMinute, 0), "per min", fmt(r.gc.totalSeconds, 1) + " s in total")}
+      ${figRow("draw calls", v.seconds ? fmt(v.drawCallsAvg, 0) : "-", "per frame", v.seconds ? (v.stable ? "view unchanged" : "view changed") : null)}
+      ${figRow("memory, total used", fmt(r.memory.totalUsedMB, 0), "MB", r.memory.growthKnown ? fmt(r.memory.growthTotalMBPerMin, 1) + " MB per min" : "growth unknown")}
+    </tbody></table>` : `<p class="note">No steady play in this session.</p>`;
+  const settings = (r.gameSettings || []).map(s => `<div>${esc(s.name)}</div><div>${esc(s.value)}</div>`).join("");
+  const mods = d.mods.filter(m => !m.builtin);
+  el.innerHTML = `
+    ${ses.final ? "" : `<div class="warn-line">Recording had not finished when this page was written.</div>`}
+    <div class="split">
+      <div>
+        <div class="block"><h2>Findings <span class="unit">fixed rules, in report order</span></h2><ol class="notes">${notes || `<li class="info"><span class="lvl">info</span><span>Nothing stands out.</span></li>`}</ol></div>
+        <div class="block"><h2>Mods loaded <span class="unit">${mods.length}</span></h2><ul class="modlist fill">${mods.map(m => `<li><span>${esc(m.id)}</span><span class="fig">${esc(m.version || "")}</span></li>`).join("")}</ul></div>
+      </div>
+      <div>
+        <div class="block"><h2>Steady play <span class="unit">in the world, not loading, from 60 s after the world load</span></h2>${figures}</div>
+        ${settings ? `<div class="block"><h2>Game settings</h2><div class="kv">${settings}</div></div>` : ""}
+        <div class="block"><h2>Session</h2><div class="kv">
+          <div>name</div><div>${esc(ses.name)}</div>
+          <div>label</div><div>${esc(ses.label || "-")}</div>
+          <div>map</div><div>${esc(ses.map)}</div>
+          <div>started</div><div>${esc(ses.startedLocal)}</div>
+          <div>analyzer</div><div>${esc(r.analyzerVersion)}</div>
+          <div>game</div><div>${esc((r.system || {}).gameVersion || "")}</div>
+        </div></div>
+      </div>
+    </div>`;
+}
+
+function renderTimeline() {
+  const d = current, el = $("#tab-timeline");
+  if (!d.frames.length) { el.innerHTML = `<div class="empty">No frames.csv in this session.</div>`; return; }
+  el.innerHTML = `<div class="hint hintrow"><span>One point per second. Wheel to zoom, drag to pan, double-click to reset. Shaded: menu or loading. Red ticks above a chart are spikes; hover one for its time and state, click it for its record.</span>
+     <label class="inline"><input type="checkbox" id="tlScale"> scale to loading frames too</label></div>
+     <div class="split-wide"><div id="tlCharts"></div><div class="detail" id="tlDetail"></div></div>`;
+  const host = $("#tlCharts"), F = d.frames, dom = [F[0].t_s - 1, F[F.length - 1].t_s];
+  const markers = d.spikes.map(sp => ({ x: sp.t, state: sp._state, sp }));
+  const base = { data: F, xKey: "t_s", xDomain: dom, shade: d.shade };
+  const has = k => k in F[0];
+  const onMarker = m => showSpike($("#tlDetail"), m.sp, d);
+  showSpike($("#tlDetail"), null, d);
+  new Chart(host, { ...base, title: "ms_avg, ms_p99, ms_max", unit: "ms per frame", desc: "Average, 99th percentile and worst frame time in each second. Red dashed line: the 33.3 ms spike threshold.", markers, onMarker, height: 190, threshold: { value: SPIKE_LIMIT, label: "33.3 ms" },
+    series: [{ key: "ms_avg", label: "avg", weight: 2 }, { key: "ms_p99", label: "p99", weight: 1.2, dash: [5, 3] }, { key: "ms_max", label: "max", weight: 1, dim: true, clip: true }] });
+  const cpu = [{ key: "cpu_main_ms", label: "main", weight: 2 }, { key: "cpu_render_ms", label: "render", weight: 1.2, dash: [5, 3] }, { key: "gpu_ms", label: "GPU", weight: 1.2, dim: true }];
+  if (has("cpu_total_max")) cpu.push({ key: "cpu_total_max", label: "total max", weight: 1, dash: [1, 3], clip: true });
+  new Chart(host, { ...base, title: "cpu_main_ms, cpu_render_ms, gpu_ms", unit: "ms per frame", desc: "Time the CPU main thread, the CPU render thread and the GPU took per frame, averaged per second. Total max: the slowest CPU frame in that second.", series: cpu, markers, onMarker });
+  new Chart(host, { ...base, title: "total_used_mb, system_used_mb, gc_used_mb", unit: "MB", desc: "Memory in use, read once a second: what the game uses, the whole process, and the managed (GC) heap.", series: [{ key: "total_used_mb", label: "total", weight: 2, dec: 0 }, { key: "system_used_mb", label: "system", weight: 1.2, dash: [5, 3], dec: 0 }, { key: "gc_used_mb", label: "GC", weight: 1, dim: true, dec: 0 }] });
+  new Chart(host, { ...base, title: "gc_collections, alloc_mb, gc_ms", unit: "per second", desc: "Garbage collections, megabytes of memory allocated and milliseconds spent collecting, per second.", height: 120, series: [{ key: "gc_collections", label: "collections", weight: 2, dec: 1 }, { key: "alloc_mb", label: "alloc MB", weight: 1.2, dash: [5, 3] }, { key: "gc_ms", label: "GC ms", weight: 1, dim: true }] });
+  if (has("draw_calls")) new Chart(host, { ...base, title: "draw_calls, batches, setpass", unit: "per frame", desc: "Draw calls, batches and SetPass calls per frame, averaged per second: how much there is to draw.", height: 120, series: [{ key: "draw_calls", label: "draw calls", weight: 2, dec: 0 }, { key: "batches", label: "batches", weight: 1.2, dash: [5, 3], dec: 0 }, { key: "setpass", label: "SetPass", weight: 1, dim: true, dec: 0 }] });
+  $("#tlScale").onchange = e => { Charts.list.forEach(c => { if (c.opt.data === F) c.opt.shadeInScale = e.target.checked; }); Charts.redrawAll(); };
+}
+
+function showSpike(el, sp, d) {
+  const kv = (k, v) => `<div>${esc(k)}</div><div>${sp ? v : ""}</div>`;
+  const s = sp || {};
+  const tm = sp ? (s.topMods || []).map(m => `<tr><td>${esc(m.mod)}</td><td class="n">${fmt(m.ms, 3)}</td></tr>`).join("") : "";
+  const tmeth = sp ? (s.topMethods || []).map(m => `<tr><td>${esc(m.method)}<div class="note" style="margin:0">${esc(m.kind)}, ${esc(m.mods)}</div></td><td class="n">${fmt(m.ms, 3)}</td></tr>`).join("") : "";
+  const unreliable = sp && (s._old || (s.timerMatchErrMs != null && s.timerMatchErrMs > Math.max(1, 0.05 * s.ms)));
+  el.innerHTML = `<div class="big ${s._state === "play" ? "breach" : ""}">${sp ? fmt(s.ms, 1) + ' <span class="unit">ms</span>' : "&nbsp;"}</div>
+    <p class="note">${sp ? `${stateCell(s._state)} at ${fmtTime(s.t)}${d.worldStartT != null && s.t >= d.worldStartT ? ", " + fmtTime(s.t - d.worldStartT) + " after the world load" : ""}` : "&nbsp;"}</p>
+    ${unreliable ? `<div class="warn-line">${s._old ? "Recorded before timer matching" : "Timer mismatch " + fmt(s.timerMatchErrMs) + " ms"}: CPU and GPU values may belong to another frame.</div>` : ""}
+    <div class="kv">
+      ${kv("frame", s.frame)}${kv("threshold", fmt(s.threshold, 1) + " ms, median " + fmt(s.median, 1))}
+      ${kv("frames in hitch", s.framesOverThresholdInHitch ?? "-")}
+      ${kv("cpuTotalMs", fmt(s.cpuTotalMs, 1))}${kv("cpuMainMs", fmt(s.cpuMainMs, 1))}${kv("cpuRenderMs", fmt(s.cpuRenderMs, 1))}${kv("gpuMs", fmt(s.gpuMs, 1))}
+      ${kv("timer lag", s.timerLagFrames != null ? s.timerLagFrames + " frames, mismatch " + fmt(s.timerMatchErrMs) + " ms" : "-")}
+      ${kv("gcMs", fmt(s.gcMs, 1) + ", " + (s.gcCollections ?? 0) + " collections")}
+      ${kv("saving", s.saving ? "yes" : "no")}${kv("drawCalls", s.drawCalls ?? "-")}
+      ${kv("camera", esc(s.camera ?? "-") + (s.cameraPos ? " " + s.cameraPos.join(", ") : ""))}
+      ${kv("cars, locos, trains", (s.cars ?? "-") + ", " + (s.locomotives ?? "-") + ", " + (s.trains ?? "-"))}
+      ${kv("game time", esc(s.gameTime ?? "-"))}
+    </div>
+    <h3>Mod time in this frame <span class="unit">ms</span></h3><table class="fixed"><colgroup><col><col style="width:78px"></colgroup><tbody>${tm}</tbody></table>${sp ? "" : `<div class="placeholder">(Click on a spike to show)</div>`}
+    <h3>Methods in this frame <span class="unit">ms, inclusive</span></h3><table class="fixed"><colgroup><col><col style="width:78px"></colgroup><tbody>${tmeth}</tbody></table>${sp ? "" : `<div class="placeholder">(Click on a spike to show)</div>`}`;
+}
+
+function renderSpikes() {
+  const d = current, el = $("#tab-spikes");
+  if (!d.spikes.length) { el.innerHTML = `<div class="empty">No spikes recorded.</div>`; return; }
+  const states = [...new Set(d.spikes.map(s => s._state))];
+  const counts = {}; d.spikes.forEach(s => counts[s._state] = (counts[s._state] || 0) + 1);
+  el.innerHTML = `<div class="row">${states.map(s => `<label class="inline"><input type="checkbox" data-st="${s}" ${s === "play" || states.length === 1 ? "checked" : ""}> <span class="stcount">${stateCell(s)}<span class="fig">${counts[s]}</span></span></label>`).join("")}
+      <label class="inline"><input type="checkbox" id="spGroup"> group by top mod</label>
+      <span class="note" style="margin:0">CPU values marked * were recorded before timer matching.</span></div>
+    <div class="split-wide"><div class="scroll fill"><table id="spTable"></table></div><div class="detail" id="spDetail"></div></div>`;
+  showSpike($("#spDetail"), null, d);
+  const sortState = { key: "ms", dir: -1 }, folded = new Set();
+  const draw = () => {
+    const grouped = $("#spGroup").checked;
+    const on = new Set([...el.querySelectorAll("input[data-st]:checked")].map(x => x.dataset.st));
+    const rows = d.spikes.filter(s => on.has(s._state)).map(s => ({ ...s, t2: s.t, topMod: s.topMods && s.topMods[0] ? s.topMods[0].mod : "", topModMs: s.topMods && s.topMods[0] ? s.topMods[0].ms : null, sp: s }));
+    sortable($("#spTable"), rows, [
+      { k: "t2", label: "t", n: 1, w: "56px", f: v => fmtTime(v) }, { k: "ms", label: "ms", n: 1, w: "70px", f: (v, r) => `<span class="${r._state === "play" ? "breach" : ""}">${fmt(v, 1)}</span>` }, { k: "_state", label: "state", w: "96px", f: v => stateCell(v) },
+      { k: "cpuMainMs", label: "cpu main", n: 1, w: "92px", f: (v, r) => fmt(v, 1) + (r._old ? "*" : "") }, { k: "cpuRenderMs", label: "render", n: 1, w: "82px", f: v => fmt(v, 1) },
+      { k: "gpuMs", label: "gpu", n: 1, w: "62px", f: v => fmt(v, 1) }, { k: "gcMs", label: "gc ms", n: 1, w: "72px", f: v => fmt(v, 1) }, { k: "topMod", label: "top mod" }, { k: "topModMs", label: "mod ms", n: 1, w: "80px", f: v => fmt(v, 2) }, { k: "camera", label: "camera", w: "96px" },
+    ], r => showSpike($("#spDetail"), r.sp, d), "ms", -1, { state: sortState, folded, group: grouped ? r => r.topMod || "no timed mod" : null });
+  };
+  el.querySelectorAll("input[data-st]").forEach(x => x.onchange = draw);
+  $("#spGroup").onchange = draw;
+  draw();
+}
+
+function renderMods() {
+  const d = current, el = $("#tab-mods");
+  if (!d.timing.length) { el.innerHTML = `<div class="empty">No mod-timing.csv: per-mod timing was off or had not started.</div>`; return; }
+  const top = d.modTotals.slice(0, 5).map(([m]) => m);
+  el.innerHTML = `<p class="hint">From mod-timing.csv: inclusive time of timed methods per 10 s, listed under every mod that patches a method, so these are upper bounds. The findings use exclusive time.</p>
+    <div id="modChart"></div>
+    <h2>Methods <span class="unit">whole session, click a heading to sort</span></h2><div class="scroll indent"><table id="methTable"></table></div>`;
+  const W = d.modWindows, styles = [{ weight: 2 }, { weight: 1.4, dash: [5, 3] }, { weight: 1.2, dim: true }, { weight: 1, dash: [1, 3] }, { weight: 1, dim: true, dash: [6, 2, 1, 2] }];
+  if (W.length > 1) new Chart($("#modChart"), { data: W, xKey: "t_s", xDomain: [W[0].t_s, W[W.length - 1].t_s], group: "mods", title: "mod time per frame, top 5 mods", unit: "ms per frame, 10 s windows", desc: "Main-thread time of the five busiest mods per frame, in 10 s windows. Upper bounds: a game method a mod patches counts in full.", height: 200,
+    series: top.map((m, i) => ({ key: m, label: m, dec: 3, ...styles[i] })) });
+  sortable($("#methTable"), d.methods, [
+    { k: "method", label: "method name" }, { k: "kind", label: "kind", w: "120px" }, { k: "mods", label: "mods", w: "22%" },
+    { k: "calls", label: "calls", n: 1, w: "96px", f: v => v.toLocaleString("en-GB") }, { k: "total_ms", label: "total ms", n: 1, w: "96px", f: v => fmt(v, 1) },
+    { k: "avg_us", label: "avg us", n: 1, w: "86px", f: v => fmt(v, 1) }, { k: "max_call_ms", label: "max call ms", n: 1, w: "120px", f: v => fmt(v, 2) },
+  ], null, "total_ms", -1);
+}
+
+async function renderCompare() {
+  const el = $("#tab-compare");
+  if (!sessions.length) return;
+  const last = sessions[0], others = sessions.slice(1);
+  if (!others.length) { el.innerHTML = `<div class="empty">Only one session is stored, so there is nothing to compare it with.</div>`; return; }
+  el.innerHTML = `<div class="row"><span><span class="unit">Last recorded session</span> <b>${esc(last.name)}</b></span><label class="inline"><span class="unit">vs.</span> <select id="cmpSel">${others.map(s => `<option value="${esc(s.name)}">${esc(sessionLabel(s))}</option>`).join("")}</select></label></div><div id="cmpBody"></div>`;
+  const sel = $("#cmpSel");
+  if (current && current.name !== last.name) sel.value = current.name;
+  const run = async () => drawCompare(await loadSession(last.name), await loadSession(sel.value));
+  sel.onchange = run;
+  await run();
+}
+function drawCompare(a, b) {
+  const body = $("#cmpBody");
+  Charts.list = Charts.list.filter(c => c.group !== "cmp");
+  const A = a.steady, B = b.steady, checks = [];
+  if (!A || !B) { body.innerHTML = `<div class="warn-line">One of the sessions has no steady play.</div>`; return; }
+  const modsA = new Set(a.mods.map(m => m.id)), modsB = new Set(b.mods.map(m => m.id));
+  const onlyA = [...modsA].filter(m => !modsB.has(m)), onlyB = [...modsB].filter(m => !modsA.has(m));
+  checks.push({ ok: true, k: "mods", t: onlyA.length || onlyB.length ? `only in the last recorded session: ${onlyA.join(", ") || "none"}; only in the other: ${onlyB.join(", ") || "none"}` : "same mod set" });
+  const cfgA = (a.system || {}).config || {}, cfgB = (b.system || {}).config || {};
+  if (cfgA.perModTiming !== cfgB.perModTiming) checks.push({ ok: true, k: "perModTiming", t: `last recorded ${cfgA.perModTiming}, vs. ${cfgB.perModTiming}` });
+  if (A.draw != null && B.draw != null) {
+    const diff = Math.abs(A.draw - B.draw) / Math.max(A.draw, B.draw);
+    checks.push({ ok: diff <= 0.05, k: "draw calls", t: diff > 0.05 ? `${fmt(A.draw, 0)} vs ${fmt(B.draw, 0)}, ${fmt(diff * 100, 0)}% apart: the views probably differ, so GPU and frame time differences may be the view, not the mods` : `${fmt(A.draw, 0)} vs ${fmt(B.draw, 0)}, match` });
+  }
+  if (A.cam && B.cam) {
+    const dist = Math.hypot(A.cam.cam_x - B.cam.cam_x, A.cam.cam_y - B.cam.cam_y, A.cam.cam_z - B.cam.cam_z);
+    const dy = Math.abs(((A.cam.cam_yaw - B.cam.cam_yaw + 540) % 360) - 180);
+    checks.push({ ok: !(dist > 5 || dy > 5), k: "first view", t: dist > 5 || dy > 5 ? `${fmt(dist, 1)} m apart, yaw ${fmt(dy, 1)} degrees apart` : "same" });
+  }
+  const gap = Math.abs(A.spikes - B.spikes), lim = 2 * Math.sqrt(A.spikes + B.spikes);
+  const beyond = gap > lim && A.spikes + B.spikes > 0;
+  checks.push({ ok: !beyond, k: "play spikes", t: `${A.spikes} vs ${B.spikes}, ${beyond ? "difference beyond chance" : "within chance"} (limit about ${fmt(lim, 1)})` });
+  const row = (k, unit, x, y, d = 2) => `<tr><td>${k}</td><td class="u">${unit}</td><td class="n">${fmt(x, d)}</td><td class="n">${fmt(y, d)}</td><td class="n">${y - x > 0 ? "+" : ""}${fmt(y - x, d)}</td></tr>`;
+  body.innerHTML = `<div class="split">
+      <div><h2>Steady play <span class="unit">difference: vs. minus last recorded</span></h2>
+      <table class="fixed cmp"><colgroup><col><col style="width:78px"><col style="width:110px"><col style="width:86px"><col style="width:96px"></colgroup><thead><tr><th>metric</th><th></th><th class="n">last recorded</th><th class="n">vs.</th><th class="n">difference</th></tr></thead><tbody>
+      ${row("frame time", "ms", A.ms, B.ms)}${row("frame rate", "fps", A.fps, B.fps, 1)}${row("p99, mean of seconds", "ms", A.p99, B.p99)}${row("cpu_main_ms", "ms", A.cpuMain, B.cpuMain)}${row("cpu_render_ms", "ms", A.cpuRender, B.cpuRender)}
+      ${row("gpu_ms", "ms", A.gpu, B.gpu)}${row("garbage collections", "per min", A.gcPerMin, B.gcPerMin, 1)}${row("alloc_mb", "MB/s", A.alloc, B.alloc)}${row("draw_calls", "per frame", A.draw, B.draw, 0)}
+      ${row("play spikes", "per min", A.spikesPerMin, B.spikesPerMin)}${row("steady time", "min", A.seconds / 60, B.seconds / 60, 1)}</tbody></table></div>
+      <div><h2>Checks</h2><div class="kv">${checks.map(c => `<div>${esc(c.k)}</div><div class="${c.ok ? "" : "breach"}">${esc(c.t)}</div>`).join("")}</div></div>
+    </div><div id="cmpCharts" style="margin-top:18px"></div>`;
+  const pts = new Map();
+  const add = (d, tag) => d.frames.forEach(r => { if (r._play == null || r.world !== 1) return; const k = Math.round(r._play); const o = pts.get(k) || { x: k }; o["ms" + tag] = r.ms_avg; o["main" + tag] = r.cpu_main_ms; o["gpu" + tag] = r.gpu_ms; o["max" + tag] = r.ms_max; o["load" + tag] = r.loading; pts.set(k, o); });
+  add(a, "A"); add(b, "B");
+  const data = [...pts.values()].sort((x, y) => x.x - y.x);
+  if (data.length < 2) return;
+  const dom = [data[0].x, data[data.length - 1].x], host = $("#cmpCharts");
+  const shade = []; let st = null;
+  for (const r of data) { const off = r.loadA === 1 || r.loadB === 1; if (off && st == null) st = r.x - 1; if (!off && st != null) { shade.push([st, r.x]); st = null; } }
+  new Chart(host, { data, xKey: "x", xDomain: dom, group: "cmp", shade, threshold: { value: SPIKE_LIMIT, label: "33.3 ms" }, title: "ms_avg and ms_max", unit: "ms per frame, x: time since world load", desc: "Average and worst frame time per second for both sessions, lined up on time since each world loaded.", height: 180,
+    series: [{ key: "msA", label: "last avg", weight: 2, c: 0 }, { key: "msB", label: "vs. avg", weight: 2, dash: [5, 3], c: 0 }, { key: "maxA", label: "last max", weight: 1, dim: true, clip: true, c: 1 }, { key: "maxB", label: "vs. max", weight: 1, dim: true, dash: [5, 3], clip: true, c: 1 }] });
+  new Chart(host, { data, xKey: "x", xDomain: dom, group: "cmp", shade, title: "cpu_main_ms and gpu_ms", unit: "ms per frame", desc: "CPU main thread and GPU time per frame for both sessions.", height: 160,
+    series: [{ key: "mainA", label: "last main", weight: 2, c: 0 }, { key: "mainB", label: "vs. main", weight: 2, dash: [5, 3], c: 0 }, { key: "gpuA", label: "last GPU", weight: 1.2, c: 2 }, { key: "gpuB", label: "vs. GPU", weight: 1.2, dash: [5, 3], c: 2 }] });
+  Charts.redrawAll();
+}
+
+function renderAi() {
+  const el = $("#tab-ai");
+  if (!current.ai) { el.innerHTML = `<div class="empty">No ai-report.md in this session.</div>`; return; }
+  el.innerHTML = `<div class="row"><button id="aiCopy">Copy ai-report.md</button><span class="note" id="aiNote" style="margin:0">Paste it into any AI assistant: it holds the instructions and this session's figures.</span></div><p class="note disclaimer">Disclaimer: an AI assistant's answer is its own interpretation, not a finding of MH Performance Analyzer. AI can make mistakes and can sound sure when it is wrong. Check its conclusions against the figures in this report before you change your setup or report a problem to a mod author.</p><textarea id="aiText" class="fill" readonly></textarea>`;
+  $("#aiText").value = current.ai;
+  $("#aiCopy").onclick = async () => {
+    const ta = $("#aiText");
+    try { await navigator.clipboard.writeText(ta.value); }
+    catch (e) { ta.focus(); ta.select(); document.execCommand("copy"); }
+    $("#aiNote").textContent = "Copied.";
+  };
+}
+function renderSummary() {
+  const el = $("#tab-summary");
+  el.innerHTML = current.summary ? `<div class="md">${md(current.summary)}</div>` : `<div class="empty">No summary.md in this session.</div>`;
+  alignSummaryTables();
+}
+// Every column is as wide as its widest text, heading included and never wrapped. The first column has the same
+// width in every table, and tables with the same headings (the two method tables) share all their widths, so they
+// line up exactly. Measured once the Summary tab is visible.
+function alignSummaryTables() {
+  const host = $("#tab-summary .md");
+  if (!host || host.dataset.aligned || !host.offsetParent) return;
+  const tables = [...host.querySelectorAll("table")];
+  const need = t => { const w = []; [...t.rows].forEach(r => [...r.cells].forEach((c, k) => { w[k] = Math.max(w[k] || 0, Math.ceil(c.getBoundingClientRect().width) + 14); })); return w; };
+  const groups = new Map();
+  tables.forEach(t => { const sig = [...t.tHead.rows[0].cells].map(c => c.textContent).join("|"); if (!groups.has(sig)) groups.set(sig, []); groups.get(sig).push(t); });
+  const widths = new Map();
+  for (const list of groups.values()) {
+    const w = [];
+    list.forEach(t => need(t).forEach((v, k) => { w[k] = Math.max(w[k] || 0, v); }));
+    list.forEach(t => widths.set(t, w));
+  }
+  const first = Math.max(...tables.map(t => widths.get(t)[0] || 0));
+  tables.forEach(t => {
+    const w = widths.get(t).slice(); w[0] = first;
+    [...t.querySelectorAll("col")].forEach((c, k) => { c.style.width = w[k] + "px"; });
+    t.style.width = w.reduce((s, v) => s + v, 0) + "px";
+    t.classList.add("aligned");
+  });
+  host.dataset.aligned = "1";
+}
+function md(text) {
+  const lines = text.split(/\r?\n/); let out = "", i = 0;
+  const inline = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  const numeric = c => /^[-+]?[\d.,]+\s*(%|ms|MB|s|us|fps)?$/.test(c.trim()) || /^[?-]$/.test(c.trim());
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^#{1,3} /.test(l)) { const n = l.match(/^#+/)[0].length; out += `<h${n}>${inline(l.slice(n + 1))}</h${n}>`; i++; continue; }
+    if (/^\|/.test(l)) {
+      const rows = []; while (i < lines.length && /^\|/.test(lines[i])) rows.push(lines[i++]);
+      const cells = r => r.replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+      const head = cells(rows[0]);
+      out += "<table><colgroup>" + head.map(() => "<col>").join("") + "</colgroup><thead><tr>" + head.map(c => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>" +
+        rows.slice(2).map(r => "<tr>" + cells(r).map(c => `<td class="${numeric(c) ? "n" : ""}" title="${esc(c)}">${inline(c)}</td>`).join("") + "</tr>").join("") + "</tbody></table>"; continue;
+    }
+    if (/^- /.test(l)) { out += "<ul>"; while (i < lines.length && /^- /.test(lines[i])) out += `<li>${inline(lines[i++].slice(2))}</li>`; out += "</ul>"; continue; }
+    // A short line ending in a colon introduces the table below it: shown as a label.
+    if (l.trim()) out += /^[^.|]{3,60}:$/.test(l.trim()) ? `<p class="label">${inline(l.trim().slice(0, -1))}</p>` : `<p>${inline(l)}</p>`;
+    i++;
+  }
+  return out;
+}
+initSessions();
+</script>
+</body>
+</html>
